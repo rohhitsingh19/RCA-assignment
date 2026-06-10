@@ -3,25 +3,25 @@ FastAPI backend for the RCA agent.
 Endpoints:
   POST /chat        — send a message, get a response
   POST /session     — create a new session
-  GET  /health      — health check
   GET  /            — serves the frontend HTML
 """
 
 import uuid
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.agent import chat, create_session
 from app.database import get_connection 
 
-app = FastAPI(title="RCA Agent API", version="1.0.0")
-
-
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     # Pre-warm DuckDB so first query isn't slow
     get_connection()
     print("[API] Database pre-warmed.")
+    yield
+
+app = FastAPI(title="RCA Agent API", version="1.0.0", lifespan=lifespan)
 
 
 @app.post("/session")

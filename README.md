@@ -1,124 +1,109 @@
 # OR2A RCA Agent
 
-A conversational agent for diagnosing delivery SLA breaches (OR2A) across quick-commerce dark stores. Built with LangGraph, FastAPI, DuckDB, and MCP.
+An autonomous, ReAct-style conversational agent for diagnosing delivery SLA breaches (OR2A) across quick-commerce dark stores. 
+
+Built with **LangGraph**, **FastAPI**, **DuckDB**, and **MCP (Model Context Protocol)**. Powered by **Gemini 1.5 Pro**.
 
 ---
 
-## Prerequisites
+## 🏗 Architecture & Agent Flow
+
+The agent operates autonomously using a ReAct (Reasoning and Acting) loop. It generates its own SQL, queries the database, and uses MCP to read business logic only when necessary.
+
+```mermaid
+graph TD
+    User([User Question]) -->|HTTP POST| FastAPI[FastAPI Backend]
+    FastAPI -->|Extract Context| ContextNode[Context Extractor Node]
+    ContextNode -->|State: messages, city, date| Agent[LangGraph Agent Node<br>Gemini 1.5 Pro]
+    
+    Agent -->|Decision: Call Tool| ToolsNode[Tools Node]
+    ToolsNode -->|Read Schema| MCP[MCP Filesystem Server]
+    ToolsNode -->|Read Playbook| MCP
+    ToolsNode -->|Execute SQL| DuckDB[(DuckDB In-Memory<br>Orders Table)]
+    
+    MCP -->|.md files| ToolsNode
+    DuckDB -->|JSON Results| ToolsNode
+    
+    ToolsNode -->|Tool Results| Agent
+    Agent -.->|Loop until answered| Agent
+    Agent -->|Natural Language Answer| FastAPI
+    FastAPI -->|JSON Response| UI([Frontend UI])
+```
+
+---
+
+## 🛠 Prerequisites
 
 - Python 3.11+
 - Node.js 18+ (for the MCP filesystem server)
-- A free Groq API key — get one at https://console.groq.com
+- A **Gemini API Key** (or you can easily swap back to Groq/OpenAI in `app/agent.py`)
 
 ---
 
-## Setup — every terminal command you need
+## 🚀 Setup & Execution
 
-### 1. Clone / unzip and enter the project
-
+### 1. Clone and enter the project
 ```bash
 cd rca-agent
 ```
 
-### 2. Check Python version
-
-```bash
-python3 --version
-# Must be 3.11 or higher
-```
-
-### 3. Create and activate a virtual environment
-
+### 2. Create and activate a virtual environment
 ```bash
 python3 -m venv venv
 source venv/bin/activate        # Mac/Linux
-# venv\Scripts\activate         # Windows
 ```
 
-### 4. Install Python dependencies
-
+### 3. Install dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 5. Set your Groq API key
-
+### 4. Set your API key
+Create a `.env` file and add your Gemini API key:
 ```bash
-cp .env.example .env
-# Open .env and replace 'your_groq_api_key_here' with your real key
+echo "GEMINI_API_KEY=your_actual_key_here" > .env
 ```
 
-Or just run:
-
-```bash
-echo "GROQ_API_KEY=your_actual_key_here" > .env
-```
-
-### 6. Install Node.js (if not already installed)
-
-```bash
-# Ubuntu/Debian
-sudo apt-get install nodejs npm
-
-# Mac
-brew install node
-
-# Verify
-node --version
-npm --version
-```
-
-### 7. Install the MCP filesystem server
-
+### 5. Install the MCP Filesystem Server
+The agent uses the official Model Context Protocol server to read documentation dynamically.
 ```bash
 npm install -g @modelcontextprotocol/server-filesystem
 ```
 
-### 8. Verify the MCP server works (optional but recommended)
-
-```bash
-npx @modelcontextprotocol/server-filesystem ./docs
-# You should see it start. Press Ctrl+C to stop.
-```
-
-### 9. Run the server
-
+### 6. Run the Application
+Start the FastAPI server (which automatically spins up DuckDB and the MCP subprocess).
 ```bash
 uvicorn app.main:app --reload --port 8000
 ```
 
-### 10. Open the chat UI
-
-```
-http://localhost:8000
-```
+### 7. Open the Chat UI
+Navigate to `http://localhost:8000` in your browser.
 
 ---
 
-## Sample questions to test
+## 🧠 Sample Questions to Test
 
-These exercise the full agent — city overview, store RCA, drill-downs, and context switching:
+These exercise the full agent—from basic stats to deep-dive root cause analysis:
 
-1. "How did Bangalore do on 2026-04-22?"
-2. "Why did STORE_003 underperform that day?"
-3. "Walk me through the morning hours at STORE_003"
-4. "What about STORE_010?"
-5. "What happened at hour 22 there?"
+1. "How did Bangalore do on 2026-04-22?" *(Agent reads schema, runs aggregation SQL)*
+2. "Why did STORE_101 underperform that day?" *(Agent reads RCA Playbook, runs multiple SQL queries to find capacity gaps)*
+3. "Walk me through the morning hours at STORE_101."
+4. "What exactly is the OR2A metric?" *(Agent calls get_or2a_definition tool)*
+5. "What happened at hour 22 there?" *(Agent remembers STORE_101 from context)*
 
 ---
 
-## Project structure
+## 📂 Project Structure
 
-```
+```text
 rca-agent/
 ├── app/
 │   ├── __init__.py
-│   ├── main.py          — FastAPI app, endpoints
-│   ├── agent.py         — LangGraph graph, session management
-│   ├── tools.py         — LangChain tools (deterministic data + RCA)
-│   ├── rca.py           — Pure RCA logic, thresholds, formatting
-│   ├── database.py      — DuckDB loader and query runner
-│   └── mcp_docs.py      — MCP filesystem client, system prompt builder
+│   ├── main.py          — FastAPI app, static UI serving
+│   ├── agent.py         — LangGraph agent, LLM setup, context extraction
+│   ├── tools.py         — 4 explicitly defined tools (3 MCP, 1 SQL)
+│   ├── database.py      — DuckDB initialization and execution engine
+│   └── mcp_docs.py      — MCP filesystem client
 ├── data/
 │   └── quick_commerce_orders_gold_20260422.csv
 ├── docs/
@@ -134,13 +119,13 @@ rca-agent/
 
 ---
 
-## Architecture decisions
+## 📐 Key Design Decisions
 
-**Why DuckDB?** Zero setup, native CSV import, fast analytical SQL, Python-native. No database server to spin up. Single `duckdb.connect(":memory:")` call loads the CSV into an in-memory table on startup.
+**1. Autonomous Text-to-SQL (ReAct)**  
+Instead of hardcoding deterministic Python functions, the agent has a single `run_sql_query` tool. The agent autonomously writes, executes, and iterates on SQL queries based on the user's question. This makes the system infinitely flexible without needing new Python endpoints for new types of questions.
 
-**Why the MCP filesystem server?** The three reference docs (RCA playbook, schema, OR2A definition) are served via MCP rather than hardcoded into prompts. This means updating a threshold or doc requires zero code changes — you just edit the markdown file. The `mcp_docs.py` module spawns the `@modelcontextprotocol/server-filesystem` MCP server as a subprocess and reads files via JSON-RPC over stdio. It falls back to direct `open()` if Node.js is not available, so the agent works either way.
-
-**Why is RCA logic deterministic?** Threshold decisions (demand spike >10%, booking gap <90%, utilization <85%) live in `rca.py` as constants — not in prompts. The LLM narrates and explains; the code decides the flags. This makes RCA results reproducible and auditable. An analyst can trust the output because the same input always produces the same flags.
+**2. MCP for Business Context**  
+The three reference documents (Schema, RCA Playbook, and OR2A definition) are not stuffed into the base System Prompt. Instead, they are exposed as **Tools** via an MCP Server. The agent selectively calls `get_schema_doc` or `get_rca_playbook` only when it needs that specific information, saving massive amounts of tokens and preventing context window overflow.
 
 **Why LangGraph over plain LangChain?** The state graph lets us carry conversation context (current store, city, date) across turns cleanly. When a user asks "what about STORE_102?", the agent reads `current_date` and `current_city` from state without the user re-specifying. The graph structure is: `update_context → agent → (tools → agent)* → END`.
 

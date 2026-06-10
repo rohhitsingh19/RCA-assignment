@@ -29,6 +29,7 @@ def _load_data(conn: duckdb.DuckDBPyConnection):
 
 def query(sql: str) -> list[dict]:
     """Run a SQL query and return list of dicts."""
+    print(f"\n[DB] Agent running SQL: \n{sql}\n")
     conn = get_connection()
     result = conn.execute(sql).fetchdf()
     # Replace NaN with None for JSON serialisation

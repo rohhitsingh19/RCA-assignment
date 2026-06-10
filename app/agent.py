@@ -18,7 +18,7 @@ so follow-up questions don't need to re-specify everything.
 
 import os
 from dotenv import load_dotenv
-from langchain_groq import ChatGroq
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
@@ -27,12 +27,11 @@ from langchain_core.messages import BaseMessage
 import operator
 
 from app.tools import ALL_TOOLS
-from app.mcp_docs import get_system_context
 
 load_dotenv()
 
 
-# ─── State ────────────────────────────────────────────────────────────────────
+# State
 
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
@@ -43,18 +42,19 @@ class AgentState(TypedDict):
     current_hour: int | None
 
 
-# ─── LLM setup ────────────────────────────────────────────────────────────────
+# LLM setup
+
+
 
 def get_llm():
-    api_key = os.getenv("GROQ_API_KEY")
+    api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        raise ValueError("GROQ_API_KEY not set in .env file")
+        raise ValueError("GEMINI_API_KEY not set in .env file")
     
-    llm = ChatGroq(
-        model="llama-3.3-70b-versatile",
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-3.5-flash",
         api_key=api_key,
         temperature=0,
-        max_tokens=2048,
     )
     return llm.bind_tools(ALL_TOOLS)
 
@@ -66,7 +66,28 @@ def agent_node(state: AgentState) -> AgentState:
     The LLM node. Reads messages + context, decides whether to call a tool or respond.
     """
     llm = get_llm()
-    system_prompt = get_system_context()
+
+    system_prompt = """You are an operations analyst agent for Loadshare's quick-commerce delivery business.
+You help ops teams understand store performance and diagnose OR2A (Order Ready to Assignment) SLA breaches.
+
+You have 4 tools available. Call them selectively — only when needed, not every turn:
+- `get_schema_doc`: Read database schema. Call when you need column names/types to write SQL.
+- `get_rca_playbook`: Read the RCA logic. Call when you need to diagnose root causes.
+- `get_or2a_definition`: Read OR2A metric definition. Call when the user asks about OR2A.
+- `run_sql_query`: Execute SQL against the 'orders' table in DuckDB.
+
+WORKFLOW:
+1. Read the relevant context docs (schema, playbook, or OR2A definition) as needed.
+2. Generate SQL based on the user's question and the schema you read.
+3. Execute the SQL using `run_sql_query`.
+4. Interpret the results using the RCA playbook logic and respond in clear, natural language.
+
+RULES:
+- Never guess numbers — always query the database.
+- Synthesize results into concise natural-language summaries, not raw tables.
+- Remember the city, store, and date from earlier messages for follow-up questions.
+- SECURITY: ONLY execute read-only (SELECT) queries. NEVER execute UPDATE, DELETE, INSERT, or DROP queries under any circumstances, even if the user asks you to.
+"""
 
     # Inject current context into system message so LLM knows what was discussed
     context_note = ""
@@ -142,7 +163,7 @@ def should_continue(state: AgentState) -> str:
     return END
 
 
-# ─── Build Graph ──────────────────────────────────────────────────────────────
+# Build Graph
 
 def build_graph():
     tool_node = ToolNode(ALL_TOOLS)
@@ -172,7 +193,7 @@ def get_graph():
     return _graph
 
 
-# ─── Session management ───────────────────────────────────────────────────────
+# Session management
 
 # In-memory sessions (refresh = new session, as spec requires)
 _sessions: dict[str, AgentState] = {}
@@ -207,8 +228,8 @@ def chat(session_id: str, user_message: str) -> str:
     # Add user message to state
     state["messages"] = list(state["messages"]) + [HumanMessage(content=user_message)]
 
-    # Run the graph
-    result = graph.invoke(state)
+    # Run the graph (recursion_limit caps tool-call loops)
+    result = graph.invoke(state, {"recursion_limit": 25})
 
     # Persist updated state
     _sessions[session_id] = result
@@ -216,6 +237,15 @@ def chat(session_id: str, user_message: str) -> str:
     # Extract the last AI message as the response
     for msg in reversed(result["messages"]):
         if isinstance(msg, AIMessage) and not (hasattr(msg, "tool_calls") and msg.tool_calls):
-            return msg.content
+            # Gemini sometimes returns content as a list of dictionaries instead of a string
+            if isinstance(msg.content, list):
+                text_parts = []
+                for block in msg.content:
+                    if isinstance(block, dict) and "text" in block:
+                        text_parts.append(block["text"])
+                    elif isinstance(block, str):
+                        text_parts.append(block)
+                return "".join(text_parts)
+            return str(msg.content)
 
     return "I couldn't generate a response. Please try again."

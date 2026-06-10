@@ -5,7 +5,7 @@ The filesystem MCP server (Node.js) runs as a subprocess and exposes the docs/
 folder via the MCP protocol. This module:
   1. Spawns the MCP server process pointing at the docs/ folder
   2. Sends read_file requests over stdio using the MCP protocol
-  3. Returns doc content to build the agent's system prompt
+  3. Returns doc content for the agent's tools
 
 Why MCP instead of plain open()?
   - Docs folder is the single source of truth — no copy-pasting into prompts
@@ -56,6 +56,25 @@ class MCPFilesystemClient:
         )
         # Give the server a moment to initialise
         time.sleep(1)
+        self._initialize()
+
+    def _initialize(self):
+        """Perform the MCP initialization handshake."""
+        # Step 1: Send initialize request
+        response = self._send("initialize", {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "rca-agent", "version": "1.0"}
+        })
+        
+        # Step 2: Send initialized notification
+        notification = {
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {}
+        }
+        self._proc.stdin.write(json.dumps(notification) + "\n")
+        self._proc.stdin.flush()
 
     def _send(self, method: str, params: dict) -> dict:
         """Send one JSON-RPC request and read one response."""
@@ -113,78 +132,19 @@ class MCPFilesystemClient:
             self._proc = None
 
 
-# ─── Fallback: plain file read if MCP server is not available ─────────────────
-
-def _read_file_direct(filename: str) -> str:
-    """Fallback: read doc directly with Python open()."""
-    path = os.path.join(DOCS_DIR, filename)
-    if not os.path.exists(path):
-        return f"[Doc not found: {filename}]"
-    with open(path, "r") as f:
-        return f.read()
-
-
-# ─── Public interface ─────────────────────────────────────────────────────────
-
 _client = MCPFilesystemClient(DOCS_DIR)
 
 
 def read_doc(doc_key: str) -> str:
     """
     Read a reference doc by key.
-    Tries MCP first; falls back to direct file read if MCP server isn't installed.
     """
     filename = DOC_FILES.get(doc_key)
     if not filename:
-        return f"Unknown doc key: {doc_key}. Available: {list(DOC_FILES.keys())}"
+        raise ValueError(
+            f"Unknown doc key: {doc_key}. Available: {list(DOC_FILES.keys())}"
+        )
 
-    try:
-        content = _client.read_file(filename)
-        if content:
-            print(f"[MCP] ✅ Successfully read '{filename}' via MCP server")
-            return content
-    except Exception as e:
-        print(f"[MCP] Falling back to direct read for {filename}: {e}")
-
-    return _read_file_direct(filename)
-
-
-_system_context_cache = None
-
-def get_system_context() -> str:
-    """
-    Build the agent's system prompt by reading all reference docs via MCP.
-    The docs folder is the single source of truth — nothing is hardcoded here.
-    Cached after first call since docs don't change at runtime.
-    """
-    global _system_context_cache
-    if _system_context_cache is not None:
-        return _system_context_cache
-
-    rca_logic = read_doc("rca_logic")
-    schema    = read_doc("schema")
-    or2a      = read_doc("or2a")
-
-    _system_context_cache = f"""You are an operations analyst agent for Loadshare's quick-commerce delivery business.
-You help ops teams understand store performance and diagnose OR2A (Order Ready to Assignment) SLA breaches.
-
-You have access to tools that query real data and run deterministic RCA checks.
-Your job is to interpret results, explain findings clearly, and maintain context across a conversation.
-
-IMPORTANT RULES:
-- Always use tools to fetch data — never guess numbers
-- When asked about a store, remember the city and date for follow-up questions
-- When user says "what about STORE_X", use the same date as the previous question
-- Present RCA findings in a clear, structured way using the playbook format
-- If a store has no problem hours, say so clearly — good performance is also an answer
-
---- REFERENCE: OR2A METRIC ---
-{or2a}
-
---- REFERENCE: DATA SCHEMA ---
-{schema}
-
---- REFERENCE: RCA PLAYBOOK ---
-{rca_logic}
-"""
-    return _system_context_cache
+    content = _client.read_file(filename)
+    print(f"[MCP] ✅ Successfully read '{filename}' via MCP server")
+    return content
