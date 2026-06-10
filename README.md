@@ -2,7 +2,7 @@
 
 An autonomous, ReAct-style conversational agent for diagnosing delivery SLA breaches (OR2A) across quick-commerce dark stores. 
 
-Built with **LangGraph**, **FastAPI**, **DuckDB**, and **MCP (Model Context Protocol)**. Powered by **Gemini 1.5 Pro**.
+Built with **LangGraph**, **FastAPI**, **DuckDB**, and **MCP (Model Context Protocol)**. Powered by **Gemini**.
 
 ---
 
@@ -129,7 +129,6 @@ The three reference documents (Schema, RCA Playbook, and OR2A definition) are no
 
 **Why LangGraph over plain LangChain?** The state graph lets us carry conversation context (current store, city, date) across turns cleanly. When a user asks "what about STORE_102?", the agent reads `current_date` and `current_city` from state without the user re-specifying. The graph structure is: `update_context → agent → (tools → agent)* → END`.
 
-**Tool design — what's a tool vs what's in the prompt vs what's in code:**
-- **Tools** (LLM decides *when* to call): `get_city_performance`, `get_store_performance`, `get_hour_detail`, `run_store_rca`, `run_hour_rca`, `list_stores` — all return pre-formatted data, the LLM doesn't write SQL.
-- **Deterministic code** (never touches LLM): RCA threshold checks, flag generation, pileup detection — all in `rca.py`.
-- **Prompt** (via MCP): Reference docs for context (playbook format, schema, metric definitions). The LLM uses these to interpret results, not to make diagnostic decisions.
+**Tool design — what's a tool vs what's in the prompt:**
+- **SQL Tool** (`run_sql_query`): The LLM dynamically writes and executes its own custom SQL queries based on the user's question. There are no hardcoded Python metrics functions.
+- **MCP Context Tools** (`get_schema_doc`, `get_rca_playbook`, `get_or2a_definition`): Reference docs are provided dynamically via MCP. The LLM reads the schema to write SQL, and reads the playbook to perform the mathematical root-cause analysis entirely within its own context window.
