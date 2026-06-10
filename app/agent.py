@@ -32,7 +32,6 @@ load_dotenv()
 
 
 # State
-
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
     # Conversation context — persists across turns
@@ -43,9 +42,6 @@ class AgentState(TypedDict):
 
 
 # LLM setup
-
-
-
 def get_llm():
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -59,8 +55,7 @@ def get_llm():
     return llm.bind_tools(ALL_TOOLS)
 
 
-# ─── Nodes ────────────────────────────────────────────────────────────────────
-
+# Nodes
 def agent_node(state: AgentState) -> AgentState:
     """
     The LLM node. Reads messages + context, decides whether to call a tool or respond.
@@ -164,7 +159,6 @@ def should_continue(state: AgentState) -> str:
 
 
 # Build Graph
-
 def build_graph():
     tool_node = ToolNode(ALL_TOOLS)
 
@@ -194,7 +188,6 @@ def get_graph():
 
 
 # Session management
-
 # In-memory sessions (refresh = new session, as spec requires)
 _sessions: dict[str, AgentState] = {}
 
@@ -237,7 +230,7 @@ def chat(session_id: str, user_message: str) -> str:
     # Extract the last AI message as the response
     for msg in reversed(result["messages"]):
         if isinstance(msg, AIMessage) and not (hasattr(msg, "tool_calls") and msg.tool_calls):
-            # Gemini sometimes returns content as a list of dictionaries instead of a string
+            # Gemini returns content as a list of dictionaries instead of a string
             if isinstance(msg.content, list):
                 text_parts = []
                 for block in msg.content:
