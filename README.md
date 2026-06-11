@@ -36,7 +36,7 @@ graph TD
 
 - Python 3.11+
 - Node.js 18+ (for the MCP filesystem server)
-- A **Gemini API Key** (or you can easily swap back to Groq/OpenAI in `app/agent.py`)
+- A **Gemini API Key** 
 
 ---
 
