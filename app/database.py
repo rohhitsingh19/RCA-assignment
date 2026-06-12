@@ -32,6 +32,6 @@ def query(sql: str) -> list[dict]:
     print(f"\n[DB] Agent running SQL: \n{sql}\n")
     conn = get_connection()
     result = conn.execute(sql).fetchdf()
-    # Replace NaN with None for JSON serialisation
-    result = result.where(result.notna(), None)
+    # Replace NaN with None for JSON serialisation. Must cast to object first!
+    result = result.astype(object).where(result.notna(), None)
     return result.to_dict(orient="records")

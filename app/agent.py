@@ -48,7 +48,7 @@ def get_llm():
         raise ValueError("GEMINI_API_KEY not set in .env file")
     
     llm = ChatGoogleGenerativeAI(
-        model="gemini-3.5-flash",
+        model="gemini-2.5-flash",
         api_key=api_key,
         temperature=0,
     )
@@ -222,7 +222,7 @@ def chat(session_id: str, user_message: str) -> str:
     state["messages"] = list(state["messages"]) + [HumanMessage(content=user_message)]
 
     # Run the graph (recursion_limit caps tool-call loops)
-    result = graph.invoke(state, {"recursion_limit": 25})
+    result = graph.invoke(state, {"recursion_limit": 10})
 
     # Persist updated state
     _sessions[session_id] = result
