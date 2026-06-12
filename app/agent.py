@@ -25,7 +25,7 @@ from langgraph.prebuilt import ToolNode
 from typing import TypedDict, Annotated, Sequence
 from langchain_core.messages import BaseMessage
 import operator
-
+from langgraph.errors import GraphRecursionError
 from app.tools import ALL_TOOLS
 
 load_dotenv()
@@ -196,8 +196,8 @@ def create_session(session_id: str) -> AgentState:
     state: AgentState = {
         "messages": [],
         "current_store": "",
-        "current_city": "Bangalore",
-        "current_date": "2026-04-22",
+        "current_city": "",
+        "current_date": "",
         "current_hour": None,
     }
     _sessions[session_id] = state
@@ -222,7 +222,10 @@ def chat(session_id: str, user_message: str) -> str:
     state["messages"] = list(state["messages"]) + [HumanMessage(content=user_message)]
 
     # Run the graph (recursion_limit caps tool-call loops)
-    result = graph.invoke(state, {"recursion_limit": 10})
+    try:
+        result = graph.invoke(state, {"recursion_limit": 10})
+    except GraphRecursionError:
+        return "I'm sorry, I hit a limit while trying to answer your question. Could you be more specific about the city or date?"
 
     # Persist updated state
     _sessions[session_id] = result
